@@ -2,8 +2,8 @@
 # Build the Chromium-for-TOS Docker application package (<appid>.tar.gz + .sha256).
 #
 # Usage: scripts/build.sh [version] [platform]
-#   version  default: <image-tag>.0.1 (official xx.yy.zzz store format)
-#            format : xx.yy.zzz, e.g. 13.0.1, 13.0.2 (major == image tag)
+#   version  default: <image-tag>-1
+#            format : <image-tag>-<packaging-iteration>, e.g. 13-4, 13-5
 #   platform default: x86_64   (TOS asset naming has no platform suffix for Docker apps,
 #                               but config.ini.platform must match the submitted arch)
 set -euo pipefail
@@ -18,7 +18,7 @@ APPID="chromiumdocker"
 IMAGE_REF=$(grep -oE 'accetto/debian-vnc-xfce-chromium-g3:[0-9a-zA-Z._-]+' "$SRC/docker-compose.yml" | head -1)
 IMAGE_TAG="${IMAGE_REF##*:}"
 
-VERSION="${1:-${IMAGE_TAG}.0.1}"
+VERSION="${1:-${IMAGE_TAG}-1}"
 PLATFORM="${2:-x86_64}"
 
 case "$PLATFORM" in
@@ -26,16 +26,21 @@ case "$PLATFORM" in
   *) echo "FATAL: platform must be x86_64 or aarch64 (got '$PLATFORM')"; exit 1 ;;
 esac
 
-# Store version format is xx.yy.zzz (official publishing process, step 5), so
-# the packaging iteration lives in the patch component: 13.0.1, 13.0.2, ...
-# The major component must still identify the pinned upstream image tag.
-UPSTREAM="${VERSION%%.*}"
+# Version format: <upstream-image-tag>-<packaging-iteration>, e.g. 13-1, 13-2.
+# The official publishing process documents "xx.yy.zzz", but that is not
+# enforced in practice - every published app carries a suffixed version
+# (metube 2026.08.28-015, navidrome 0.64.0-4, kavita 0.9.1.4-3) and so does our
+# own authentikdocker 2026.8.2-2. Iterations are strictly increasing and never
+# zero padded.
+# never zero pad the iteration: dpkg/platform compare numerically, so "-01"
+# is not an upgrade over "-1"
 case "$VERSION" in
-  [0-9]*.[0-9]*.[0-9]*) : ;;
-  *) echo "FATAL: version must be xx.yy.zzz (got '$VERSION')"; exit 1 ;;
+  *-0|*-0[0-9]*)
+    echo "FATAL: packaging iteration must not be zero padded (got '$VERSION')"; exit 1 ;;
 esac
+UPSTREAM="${VERSION%%-*}"
 [ "$IMAGE_TAG" = "$UPSTREAM" ] || {
-  echo "FATAL: compose image tag ($IMAGE_TAG) != major component of version ($UPSTREAM)"
+  echo "FATAL: compose image tag ($IMAGE_TAG) != upstream base of version ($UPSTREAM)"
   exit 1
 }
 
@@ -97,12 +102,12 @@ chk(names == sorted(["config.ini", f"{appid}.lang", f"{appid}.svg", "docker-comp
 raw_cfg = (stage / "config.ini").read_text(encoding="utf-8")
 chk("@@" not in raw_cfg, "config.ini still contains unreplaced @@PLACEHOLDER@@")
 cfg = json.loads(raw_cfg)
-upstream = ver.split(".")[0]
+upstream = ver.split("-")[0]
 
 chk(cfg["id"] == appid, "id must equal appid")
 chk(cfg["version"] == ver, f"config.ini version must be {ver}")
-chk(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", cfg["version"]) is not None,
-    "version must be exactly xx.yy.zzz (official store format)")
+chk(re.fullmatch(r"[0-9][0-9.]{0,15}(-[1-9][0-9]{0,2})?", cfg["version"]) is not None,
+    "version must be digits/dots with an optional -N suffix (N>=1, no zero padding)")
 chk(cfg["application_type"] == "docker", "application_type must be docker")
 chk("DockerEngine" in cfg["depend"], "depend must include DockerEngine")
 chk("docker" in cfg["relation"] and "DockerEngine" in cfg["relation"], "relation must list docker + DockerEngine")
@@ -169,8 +174,8 @@ for banned in ("privileged", "network_mode", "docker.sock", "cap_add", "pid:", "
 chk(re.search(r"ghcr\.io|quay\.io|lscr\.io|registry\.", comp_nc) is None,
     "images must come from Docker Hub (bare names)")
 chk(":latest" not in comp_nc, "image must use a fixed tag, never :latest")
-chk(f"accetto/debian-vnc-xfce-chromium-g3:{image_tag}" in comp_nc,
-    f"chromium image tag must equal the major component of the version ({image_tag})")
+chk(f"accetto/debian-vnc-xfce-chromium-g3:{upstream}" in comp_nc,
+    f"chromium image tag must equal the upstream base of the version ({upstream})")
 chk(re.search(rf"container_name:\s*{appid}\s*$", comp_nc, re.M) is not None,
     "main container_name must equal appid")
 services = comp_nc.count("container_name:")
