@@ -1,0 +1,16 @@
+# build artifacts
+out/
+build/
+
+# internal handover docs (never push to the public repo)
+HANDOFF.md
+AGENTS.md
+CHANGELOG.md
+docs/
+
+# internal test harness (contains lab specifics)
+test/
+
+# macOS noise
+.DS_Store
+._*

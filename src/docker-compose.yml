@@ -1,0 +1,92 @@
+# Chromium Web Browser for TerraMaster TOS 7 (Docker application)
+#
+# Upstream image : accetto/debian-vnc-xfce-chromium-g3 (Docker Hub, tag 13)
+#   -> https://github.com/accetto/debian-vnc-xfce-g3
+#   Debian 13 (trixie) + Xfce desktop + TigerVNC + noVNC + Chromium taken from
+#   the Debian archive (current release), runs as a non-root user by design
+#   (uid 1000/1001) and serves its web client over plain HTTP, which is what
+#   the TOS Docker app model requires.
+#
+#   NOTE: use the *Debian* variant, not accetto/ubuntu-vnc-xfce-chromium-g3.
+#   The Ubuntu images pin a frozen chromium-browser 112.0.5615.49 (April 2023)
+#   .deb from the Ubuntu 18.04 archive; the Debian images install the current
+#   chromium from the Debian archive. See docs/DESIGN_DECISIONS.md DD-001a.
+#
+# Why not linuxserver/chromium:
+#   * its s6 init writes /etc/nginx and /etc/sudoers and requires root, while
+#     TOS forbids root containers (user field is mandatory);
+#   * its Selkies web client needs WebCodecs, which browsers only expose in a
+#     secure context, so it is deliberately unusable over plain HTTP -
+#     TOS opens Docker apps as http://${ip}:<port>.
+#   See docs/DESIGN_DECISIONS.md (DD-001) for the full comparison.
+#
+# TOS rules honoured here:
+#   * Docker Hub image only, fixed tag (never :latest)
+#   * container_name == application id, restart: unless-stopped
+#   * non-root user via the user field, no privileged mode, no host network
+#   * all persistent data under /Volume*/DockerAppData/<appid>/
+#   * explicit TZ, healthcheck on the only service
+#   * no hardcoded credentials: the VNC password is generated on first start
+#   * x-app-meta is the last block of this file
+
+services:
+  chromiumdocker:
+    image: accetto/debian-vnc-xfce-chromium-g3:13
+    container_name: chromiumdocker
+    restart: unless-stopped
+    # TOS policy: containers must run as a non-root user (uid/gid 1000)
+    user: "1000:1000"
+    # Chromium needs a real /dev/shm; the Docker default of 64 MB crashes tabs
+    shm_size: 1gb
+    # The image ships /usr/bin/tini -- /dockerstartup/startup.sh as entrypoint.
+    # We wrap it to create the VNC password on first start (TOS forbids
+    # hardcoded credentials and the upstream image would otherwise use its
+    # well-known default). The password is persisted in the mounted home
+    # directory and re-used on every later start.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -u
+        PWFILE="${HOME}/.vnc_password"
+        if [ ! -s "${PWFILE}" ]; then
+          umask 077
+          head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16 > "${PWFILE}" 2>/dev/null || true
+        fi
+        if [ -s "${PWFILE}" ]; then
+          VNC_PW="$(cat "${PWFILE}")"
+        else
+          # last resort so the required variable is never empty
+          VNC_PW="$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)"
+        fi
+        export VNC_PW
+        exec /usr/bin/tini -- /dockerstartup/startup.sh --wait \
+          "chromium --no-sandbox --disable-gpu --start-maximized"
+    ports:
+      # host:container - host port in the TOS-recommended 8000-19999 range
+      - "8901:6901"
+    environment:
+      # explicit timezone (TOS requirement; change to your local zone if needed)
+      TZ: Asia/Shanghai
+      # desktop geometry streamed through noVNC
+      VNC_RESOLUTION: 1600x900
+      VNC_COL_DEPTH: "24"
+      VNC_PORT: "5901"
+      NOVNC_PORT: "6901"
+      VNC_CONFIG_HOME: /home/headless/.config/tigervnc
+    volumes:
+      # whole home directory: Chromium profile, bookmarks, downloads, noVNC/VNC
+      # config and the generated VNC password all live here and survive updates
+      - /Volume*/DockerAppData/chromiumdocker/config:/home/headless
+    healthcheck:
+      # noVNC/websockify answers on 6901 as soon as the desktop is up
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6901/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# TOS App Center web metadata (must be the last block of the file)
+x-app-meta:
+  web:
+    port: 8901
+    protocol: http
