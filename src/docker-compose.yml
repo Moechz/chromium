@@ -43,20 +43,33 @@ services:
     # hardcoded credentials and the upstream image would otherwise use its
     # well-known default). The password is persisted in the mounted home
     # directory and re-used on every later start.
+    #
+    # The persist step runs in the background on purpose: on the very first
+    # start the bind-mounted home directory may still be owned by root (Docker
+    # creates missing bind sources as root:root, and the upstream startup
+    # script only chowns $HOME to the container user a few seconds later). A
+    # foreground write would therefore fail and leave the running container
+    # with a random password nobody can read. The watcher retries until the
+    # directory becomes writable, so the password always ends up on the NAS.
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
         set -u
         PWFILE="${HOME}/.vnc_password"
-        if [ ! -s "${PWFILE}" ]; then
-          umask 077
-          head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16 > "${PWFILE}" 2>/dev/null || true
-        fi
         if [ -s "${PWFILE}" ]; then
           VNC_PW="$(cat "${PWFILE}")"
         else
-          # last resort so the required variable is never empty
           VNC_PW="$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)"
+          (
+            i=0
+            while [ "$i" -lt 60 ]; do
+              if (umask 077; printf '%s' "${VNC_PW}" > "${PWFILE}") 2>/dev/null; then
+                [ -s "${PWFILE}" ] && break
+              fi
+              i=$((i + 1))
+              sleep 2
+            done
+          ) &
         fi
         export VNC_PW
         exec /usr/bin/tini -- /dockerstartup/startup.sh --wait \
