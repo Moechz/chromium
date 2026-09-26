@@ -1,7 +1,7 @@
 # ============================================================
 # Multilingual file for the TOS 7 Docker application "chromiumdocker".
 # File name MUST be: <appid>.lang
-# Superset of both official 14-language lists (see DESIGN_DECISIONS DD-004).
+# Superset of both official 14-language lists; untranslated nodes use English.
 # Untranslated nodes fall back to English, which the official guide allows.
 # ============================================================
 

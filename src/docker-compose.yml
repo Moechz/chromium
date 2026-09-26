@@ -10,7 +10,7 @@
 #   NOTE: use the *Debian* variant, not accetto/ubuntu-vnc-xfce-chromium-g3.
 #   The Ubuntu images pin a frozen chromium-browser 112.0.5615.49 (April 2023)
 #   .deb from the Ubuntu 18.04 archive; the Debian images install the current
-#   chromium from the Debian archive. See docs/DESIGN_DECISIONS.md DD-001a.
+#   chromium from the Debian archive. See README: "Use the Debian variant, not the Ubuntu one".
 #
 # Why not linuxserver/chromium:
 #   * its s6 init writes /etc/nginx and /etc/sudoers and requires root, while
@@ -18,7 +18,7 @@
 #   * its Selkies web client needs WebCodecs, which browsers only expose in a
 #     secure context, so it is deliberately unusable over plain HTTP -
 #     TOS opens Docker apps as http://${ip}:<port>.
-#   See docs/DESIGN_DECISIONS.md (DD-001) for the full comparison.
+#   See README: "Why not linuxserver/chromium".
 #
 # TOS rules honoured here:
 #   * Docker Hub image only, fixed tag (never :latest)
