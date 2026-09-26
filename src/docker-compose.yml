@@ -44,6 +44,9 @@ services:
     # 1) Generate the VNC password on first start (TOS forbids hardcoded
     #    credentials; the upstream image would otherwise use its well-known
     #    default) and persist it in the mounted home so it survives restarts.
+    #    Two copies are written: `.vnc_password` (0600, used by tooling) and a
+    #    plainly named `VNC-PASSWORD.txt` (0644) so the NAS administrator can
+    #    find the password in the File Manager without hunting for dot-files.
     # 2) Purge the stale Chromium SingletonLock. A recreated container gets a
     #    new hostname, and Chromium then refuses to start with "the profile
     #    appears to be in use by another Chromium process on another computer",
@@ -63,24 +66,36 @@ services:
               /home/headless/.config/chromium/SingletonSocket \
               /home/headless/.config/chromium/SingletonCookie 2>/dev/null || true
         PW=/home/headless/.vnc_password
+        VIS=/home/headless/VNC-PASSWORD.txt
         if [ -s "$$PW" ]; then
           read -r VNC_PW < "$$PW"
+          cp "$$PW" /tmp/.vnc_pw 2>/dev/null || true
         else
           head -c 256 /dev/urandom | tr -dc A-Za-z0-9 | head -c 16 > /tmp/.vnc_pw
           read -r VNC_PW < /tmp/.vnc_pw
-          (
-            n=0
-            while [ "$$n" -lt 60 ]; do
-              if (umask 077; cat /tmp/.vnc_pw > "$$PW") 2>/dev/null; then
-                [ -s "$$PW" ] && break
-              fi
-              n=$$((n + 1))
-              sleep 2
-            done
-            rm -f /tmp/.vnc_pw
-          ) &
         fi
         export VNC_PW
+        (
+          n=0
+          while [ "$$n" -lt 60 ]; do
+            if [ -s /tmp/.vnc_pw ]; then
+              if (umask 077; cat /tmp/.vnc_pw > "$$PW") 2>/dev/null && [ -s "$$PW" ]; then
+                {
+                  echo "Chromium Web Browser - VNC login password"
+                  echo
+                  cat /tmp/.vnc_pw
+                  echo
+                  echo "Open http://<NAS-IP>:8901/ and enter this password."
+                } > "$$VIS" 2>/dev/null || true
+                chmod 0644 "$$VIS" 2>/dev/null || true
+                rm -f /tmp/.vnc_pw
+                break
+              fi
+            fi
+            n=$$((n + 1))
+            sleep 2
+          done
+        ) &
         exec /usr/bin/tini -- /dockerstartup/startup.sh --wait \
           "chromium --no-sandbox --disable-gpu --start-maximized"
     ports:

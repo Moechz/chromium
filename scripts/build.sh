@@ -2,8 +2,8 @@
 # Build the Chromium-for-TOS Docker application package (<appid>.tar.gz + .sha256).
 #
 # Usage: scripts/build.sh [version] [platform]
-#   version  default: the accetto image tag pinned in src/docker-compose.yml (e.g. 13)
-#            format : <upstream-base>[-<packaging-iteration>], e.g. 13-1, 13-2
+#   version  default: <image-tag>.0.1 (official xx.yy.zzz store format)
+#            format : xx.yy.zzz, e.g. 13.0.1, 13.0.2 (major == image tag)
 #   platform default: x86_64   (TOS asset naming has no platform suffix for Docker apps,
 #                               but config.ini.platform must match the submitted arch)
 set -euo pipefail
@@ -18,7 +18,7 @@ APPID="chromiumdocker"
 IMAGE_REF=$(grep -oE 'accetto/debian-vnc-xfce-chromium-g3:[0-9a-zA-Z._-]+' "$SRC/docker-compose.yml" | head -1)
 IMAGE_TAG="${IMAGE_REF##*:}"
 
-VERSION="${1:-$IMAGE_TAG}"
+VERSION="${1:-${IMAGE_TAG}.0.1}"
 PLATFORM="${2:-x86_64}"
 
 case "$PLATFORM" in
@@ -26,9 +26,16 @@ case "$PLATFORM" in
   *) echo "FATAL: platform must be x86_64 or aarch64 (got '$PLATFORM')"; exit 1 ;;
 esac
 
-UPSTREAM="${VERSION%%-*}"
+# Store version format is xx.yy.zzz (official publishing process, step 5), so
+# the packaging iteration lives in the patch component: 13.0.1, 13.0.2, ...
+# The major component must still identify the pinned upstream image tag.
+UPSTREAM="${VERSION%%.*}"
+case "$VERSION" in
+  [0-9]*.[0-9]*.[0-9]*) : ;;
+  *) echo "FATAL: version must be xx.yy.zzz (got '$VERSION')"; exit 1 ;;
+esac
 [ "$IMAGE_TAG" = "$UPSTREAM" ] || {
-  echo "FATAL: compose image tag ($IMAGE_TAG) != upstream base of version ($UPSTREAM)"
+  echo "FATAL: compose image tag ($IMAGE_TAG) != major component of version ($UPSTREAM)"
   exit 1
 }
 
@@ -70,11 +77,12 @@ for p in stage.rglob("*"):
 PY
 
 # ---------- verify (TOS review-standards self-check) ----------
-python3 - "$STAGE" "$VERSION" "$PLATFORM" "$APPID" <<'PY'
+python3 - "$STAGE" "$VERSION" "$PLATFORM" "$APPID" "$IMAGE_TAG" <<'PY'
 import json, re, sys, pathlib
 import xml.etree.ElementTree as ET
 
-stage, ver, plat, appid = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+stage, ver, plat, appid, image_tag = (pathlib.Path(sys.argv[1]), sys.argv[2],
+                                      sys.argv[3], sys.argv[4], sys.argv[5])
 errs = []
 def chk(cond, msg):
     if not cond:
@@ -89,12 +97,12 @@ chk(names == sorted(["config.ini", f"{appid}.lang", f"{appid}.svg", "docker-comp
 raw_cfg = (stage / "config.ini").read_text(encoding="utf-8")
 chk("@@" not in raw_cfg, "config.ini still contains unreplaced @@PLACEHOLDER@@")
 cfg = json.loads(raw_cfg)
-upstream = ver.split("-")[0]
+upstream = ver.split(".")[0]
 
 chk(cfg["id"] == appid, "id must equal appid")
 chk(cfg["version"] == ver, f"config.ini version must be {ver}")
-chk(re.fullmatch(r"[0-9][0-9.]{0,15}(-[0-9]{1,3})?", cfg["version"]) is not None,
-    "version must be digits/dots with optional -N suffix, max 20 chars, no zero padding")
+chk(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", cfg["version"]) is not None,
+    "version must be exactly xx.yy.zzz (official store format)")
 chk(cfg["application_type"] == "docker", "application_type must be docker")
 chk("DockerEngine" in cfg["depend"], "depend must include DockerEngine")
 chk("docker" in cfg["relation"] and "DockerEngine" in cfg["relation"], "relation must list docker + DockerEngine")
@@ -161,8 +169,8 @@ for banned in ("privileged", "network_mode", "docker.sock", "cap_add", "pid:", "
 chk(re.search(r"ghcr\.io|quay\.io|lscr\.io|registry\.", comp_nc) is None,
     "images must come from Docker Hub (bare names)")
 chk(":latest" not in comp_nc, "image must use a fixed tag, never :latest")
-chk(f"accetto/debian-vnc-xfce-chromium-g3:{upstream}" in comp_nc,
-    f"chromium image tag must equal upstream base of version ({upstream})")
+chk(f"accetto/debian-vnc-xfce-chromium-g3:{image_tag}" in comp_nc,
+    f"chromium image tag must equal the major component of the version ({image_tag})")
 chk(re.search(rf"container_name:\s*{appid}\s*$", comp_nc, re.M) is not None,
     "main container_name must equal appid")
 services = comp_nc.count("container_name:")

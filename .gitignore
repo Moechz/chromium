@@ -2,6 +2,11 @@
 out/
 build/
 
+# the package is distributed via GitHub Releases only - never commit it to the
+# repository root (official publishing process, step 3)
+/chromiumdocker.tar.gz
+/chromiumdocker.tar.gz.sha256
+
 # internal handover docs (never push to the public repo)
 HANDOFF.md
 AGENTS.md
