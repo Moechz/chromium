@@ -190,6 +190,13 @@ for pat, msg in ((r"PASSWORD:\s*\S", "compose must not contain a literal passwor
                  (r"VNC_PW:\s*\S", "compose must not contain a literal VNC password")):
     chk(re.search(pat, comp_nc) is None, msg)
 chk("http://127.0.0.1:6901/" in comp_nc, "healthcheck must probe the noVNC port")
+# every '$' in a compose file is subject to ${VAR} interpolation: an unescaped
+# ${HOME} is replaced by the *host's* home and undefined variables expand to an
+# empty string (this exact trap shipped in 13-1). Only '$$' is safe.
+bad_dollars = re.findall(r"(?<!\$)\$\{?[A-Za-z_]", comp_nc)
+chk(not bad_dollars, f"unescaped '$' in compose (use '$$'): {sorted(set(bad_dollars))}")
+chk(comp_nc.count("$$PW") >= 2 and "$$n" in comp_nc, "password block must use '$$' escapes")
+chk("SingletonLock" in comp_nc, "must purge the stale Chromium SingletonLock on start")
 
 if errs:
     print("VERIFY FAIL:")

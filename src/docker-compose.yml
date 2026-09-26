@@ -39,36 +39,45 @@ services:
     # Chromium needs a real /dev/shm; the Docker default of 64 MB crashes tabs
     shm_size: 1gb
     # The image ships /usr/bin/tini -- /dockerstartup/startup.sh as entrypoint.
-    # We wrap it to create the VNC password on first start (TOS forbids
-    # hardcoded credentials and the upstream image would otherwise use its
-    # well-known default). The password is persisted in the mounted home
-    # directory and re-used on every later start.
+    # We wrap it for two reasons:
     #
-    # The persist step runs in the background on purpose: on the very first
-    # start the bind-mounted home directory may still be owned by root (Docker
-    # creates missing bind sources as root:root, and the upstream startup
-    # script only chowns $HOME to the container user a few seconds later). A
-    # foreground write would therefore fail and leave the running container
-    # with a random password nobody can read. The watcher retries until the
-    # directory becomes writable, so the password always ends up on the NAS.
+    # 1) Generate the VNC password on first start (TOS forbids hardcoded
+    #    credentials; the upstream image would otherwise use its well-known
+    #    default) and persist it in the mounted home so it survives restarts.
+    # 2) Purge the stale Chromium SingletonLock. A recreated container gets a
+    #    new hostname, and Chromium then refuses to start with "the profile
+    #    appears to be in use by another Chromium process on another computer",
+    #    which aborts the startup script and puts the container into a restart
+    #    loop on every upgrade.
+    #
+    # IMPORTANT: every '$' below is deliberately written as '$$'. docker compose
+    # performs ${VAR} interpolation on this file, so an unescaped ${HOME} would
+    # be replaced by the *host's* root home and undefined variables would
+    # silently expand to an empty string - which is exactly how the first
+    # release ended up running with an unreadable random password.
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
         set -u
-        PWFILE="${HOME}/.vnc_password"
-        if [ -s "${PWFILE}" ]; then
-          VNC_PW="$(cat "${PWFILE}")"
+        rm -f /home/headless/.config/chromium/SingletonLock \
+              /home/headless/.config/chromium/SingletonSocket \
+              /home/headless/.config/chromium/SingletonCookie 2>/dev/null || true
+        PW=/home/headless/.vnc_password
+        if [ -s "$$PW" ]; then
+          read -r VNC_PW < "$$PW"
         else
-          VNC_PW="$(head -c 256 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 16)"
+          head -c 256 /dev/urandom | tr -dc A-Za-z0-9 | head -c 16 > /tmp/.vnc_pw
+          read -r VNC_PW < /tmp/.vnc_pw
           (
-            i=0
-            while [ "$i" -lt 60 ]; do
-              if (umask 077; printf '%s' "${VNC_PW}" > "${PWFILE}") 2>/dev/null; then
-                [ -s "${PWFILE}" ] && break
+            n=0
+            while [ "$$n" -lt 60 ]; do
+              if (umask 077; cat /tmp/.vnc_pw > "$$PW") 2>/dev/null; then
+                [ -s "$$PW" ] && break
               fi
-              i=$((i + 1))
+              n=$$((n + 1))
               sleep 2
             done
+            rm -f /tmp/.vnc_pw
           ) &
         fi
         export VNC_PW
