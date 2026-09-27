@@ -53,11 +53,21 @@ for f in config.ini "$APPID.lang" "$APPID.svg" docker-compose.yml; do
   cp "$SRC/$f" "$STAGE/$f"
 done
 
-python3 - "$STAGE" "$VERSION" "$PLATFORM" "$APPID" <<'PY'
+# the font provisioner lives in its own source file for readability; it is
+# embedded into the compose file here, indented to the YAML block level so that
+# it lands at column 0 inside the container command
+python3 - "$SRC" "$STAGE" "$VERSION" "$PLATFORM" "$APPID" <<'PY'
 import sys, pathlib
-stage, ver, plat, appid = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+src, stage, ver, plat, appid = (pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]),
+                                sys.argv[3], sys.argv[4], sys.argv[5])
+prov = (src / "provision-fonts.py").read_text(encoding="utf-8").rstrip("\n")
+indented = "\n".join(("        " + l) if l.strip() else "" for l in prov.splitlines())
+comp = stage / "docker-compose.yml"
+text = comp.read_text(encoding="utf-8")
+assert "@@PROVISION_PY@@" in text, "compose is missing the @@PROVISION_PY@@ placeholder"
+comp.write_text(text.replace("        @@PROVISION_PY@@", indented), encoding="utf-8")
 for name in ("config.ini", f"{appid}.lang"):
-    p = pathlib.Path(stage) / name
+    p = stage / name
     data = (p.read_text(encoding="utf-8")
              .replace("@@VERSION@@", ver)
              .replace("@@PLATFORM@@", plat))
@@ -82,12 +92,13 @@ for p in stage.rglob("*"):
 PY
 
 # ---------- verify (TOS review-standards self-check) ----------
-python3 - "$STAGE" "$VERSION" "$PLATFORM" "$APPID" "$IMAGE_TAG" <<'PY'
+python3 - "$STAGE" "$VERSION" "$PLATFORM" "$APPID" "$IMAGE_TAG" "$SRC" <<'PY'
 import json, re, sys, pathlib
 import xml.etree.ElementTree as ET
 
-stage, ver, plat, appid, image_tag = (pathlib.Path(sys.argv[1]), sys.argv[2],
-                                      sys.argv[3], sys.argv[4], sys.argv[5])
+stage, ver, plat, appid, image_tag, _src_arg = (pathlib.Path(sys.argv[1]), sys.argv[2],
+                                                sys.argv[3], sys.argv[4], sys.argv[5],
+                                                pathlib.Path(sys.argv[6]))
 errs = []
 def chk(cond, msg):
     if not cond:
@@ -210,6 +221,23 @@ bad_dollars = re.findall(r"(?<!\$)\$\{?[A-Za-z_]", comp_nc)
 chk(not bad_dollars, f"unescaped '$' in compose (use '$$'): {sorted(set(bad_dollars))}")
 chk(comp_nc.count("$$PW") >= 2 and "$$n" in comp_nc, "password block must use '$$' escapes")
 chk("SingletonLock" in comp_nc, "must purge the stale Chromium SingletonLock on start")
+
+# ---- embedded font provisioner must survive the YAML embedding intact ----
+import ast as _ast
+_m = re.search(r"<<'PYEOF'\n(.*?)\n\s*PYEOF", comp, re.S)
+chk(_m is not None, "compose must embed the font provisioner heredoc")
+if _m:
+    import textwrap as _tw
+    _py = _tw.dedent(_m.group(1))
+    try:
+        _ast.parse(_py)
+    except SyntaxError as _e:
+        errs.append(f"embedded provisioner is not valid python: {_e}")
+    _norm = lambda s: [l.strip() for l in s.splitlines() if l.strip()]
+    _src = (_src_arg / "provision-fonts.py").read_text(encoding="utf-8")
+    chk(_norm(_py) == _norm(_src), "embedded provisioner differs from src/provision-fonts.py")
+    chk(len(re.findall(r'"([0-9a-f]{64})"', _py)) == 3,
+        "provisioner must pin exactly 3 sha256 digests")
 
 if errs:
     print("VERIFY FAIL:")
