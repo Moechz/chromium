@@ -101,3 +101,15 @@ Chromium is © The Chromium Authors (BSD-3-Clause). The container image is built
 [accetto](https://github.com/accetto/debian-vnc-xfce-g3) (GPL-3.0) and is used
 unmodified from Docker Hub. The icon here is an independent simplified rendering of
 the Chromium mark. This packaging is an independent community submission by Moechz.
+
+## Limitations
+
+- **No sound.** noVNC streams video only; the browser inside the container is mute.
+  This is a property of the noVNC transport, not a configuration issue.
+- **One shared desktop session.** Everyone who opens the app sees and controls the
+  same desktop (that is how VNC works), so it is an appliance-style browser rather
+  than one isolated browser per user.
+- Chromium runs with `--no-sandbox` inside the container, as the upstream image requires.
+
+Both points above are also disclosed to end users in the 23-language `important`
+field of `chromiumdocker.lang`, which the App Center shows on the app page.
