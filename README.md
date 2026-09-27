@@ -19,6 +19,14 @@ Bookmarks, history, extensions, saved logins and downloads are stored on the NAS
 
 ## Design highlights
 
+- **Multi-language out of the box.** The upstream image ships only 8 DejaVu faces, so
+  CJK, Indic, Thai, Khmer, Myanmar, Ethiopic and emoji would render as empty boxes. On
+  first start the app fetches about **78 MB of open-source Noto fonts** (three
+  sha256-pinned Debian packages) into the app data directory; measured on real hardware
+  this takes **9 seconds** and afterwards every script renders. It never blocks or breaks
+  the app: it is skipped once provisioned, can be disabled with `FONTS=off`, retries on
+  the next start if it fails, and you can instead copy your own `.ttf/.otf/.ttc` files
+  into `/Volume*/DockerAppData/chromiumdocker/config/.local/share/fonts`.
 - **Non-root by design.** The upstream image runs as an unprivileged user
   (uid 1000/1001) and serves its web client over **plain HTTP** — exactly what the
   TOS Docker model (`http://${ip}:<port>`) needs. Every service pins `user: "1000:1000"`.
