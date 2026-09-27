@@ -87,11 +87,40 @@ services:
           read -r VNC_PW < /tmp/.vnc_pw
         fi
         export VNC_PW
-        # persist the password once the mounted home is writable
+        # Persist the password and publish the info page. Both writes are
+        # retried: a freshly created bind-mount source (config, and on the
+        # first run of a new mount also config/info) is created root-owned by
+        # Docker and only becomes writable once the upstream startup script has
+        # chowned the mounted home to the container user.
         (
           n=0
           while [ "$$n" -lt 60 ]; do
             if [ -s /tmp/.vnc_pw ]; then
+              ok=1
+              if [ "$${SHOW_PASSWORD:-on}" != "off" ]; then
+                mkdir -p /home/headless/info 2>/dev/null || true
+                {
+                  echo '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                  echo '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                  echo '<title>Chromium Web Browser</title><style>'
+                  echo 'body{font-family:system-ui,sans-serif;background:#101418;color:#e8eaed;max-width:44rem;margin:0 auto;padding:2.5rem 1.5rem;line-height:1.7}'
+                  echo 'code{background:#1e2630;padding:.15em .45em;border-radius:.3em}a{color:#8ab4f8}'
+                  echo 'td{padding:.2rem 1rem .2rem 0}table{border-collapse:collapse}'
+                  echo '</style></head><body><h2>Chromium Web Browser</h2><table>'
+                  echo '<tr><td>Open the browser</td><td><a href="../vnc.html">vnc.html</a></td></tr>'
+                  echo '<tr><td>VNC password</td><td><code>'
+                  cat /tmp/.vnc_pw
+                  echo '</code></td></tr></table>'
+                  echo '<p>To change it, edit <code>.vnc_password</code> in'
+                  echo '<code>&lt;volume&gt;/DockerAppData/chromiumdocker/config/</code>'
+                  echo 'on the NAS and restart the application.</p><hr>'
+                  echo '<p>中文：点上面的 <b>vnc.html</b> 打开浏览器，密码见上表。'
+                  echo '要更换密码，请在 NAS 上编辑数据目录里的 <code>.vnc_password</code> 后重启应用。</p>'
+                  echo '</body></html>'
+                } > /home/headless/info/index.html 2>/dev/null || ok=0
+                cp /tmp/.vnc_pw /home/headless/info/VNC-PASSWORD.txt 2>/dev/null || ok=0
+                chmod 0644 /home/headless/info/index.html /home/headless/info/VNC-PASSWORD.txt 2>/dev/null || true
+              fi
               if (umask 077; cat /tmp/.vnc_pw > "$$PW") 2>/dev/null && [ -s "$$PW" ]; then
                 {
                   echo "Chromium Web Browser - VNC login password"
@@ -101,6 +130,10 @@ services:
                   echo "Open http://<NAS-IP>:8901/ and enter this password."
                 } > "$$VIS" 2>/dev/null || true
                 chmod 0644 "$$VIS" 2>/dev/null || true
+              else
+                ok=0
+              fi
+              if [ "$$ok" = 1 ]; then
                 rm -f /tmp/.vnc_pw
                 break
               fi
@@ -143,11 +176,24 @@ services:
       # set FONTS=off to skip the one-time multi-script font download (about
       # 78 MB); users can then drop .ttf/.otf/.ttc into <data>/.local/share/fonts
       FONTS: "on"
+      # the VNC password (per-install random) is published at
+      # http://<NAS-IP>:8901/info/ so that users never need SSH to find it;
+      # set SHOW_PASSWORD=off to keep it off the web (then it is only in
+      # <data>/.vnc_password and VNC-PASSWORD.txt, readable via SSH)
+      SHOW_PASSWORD: "on"
     volumes:
       # whole home directory: Chromium profile, bookmarks, downloads, noVNC/VNC
       # config, the generated VNC password and the provisioned fonts all live
       # here and survive updates
       - /Volume*/DockerAppData/chromiumdocker/config:/home/headless
+      # Only the small `info` sub-directory is exposed, never the whole home:
+      # this makes the VNC password reachable at
+      #   http://<NAS-IP>:8901/info/
+      # without SSH. The TOS File Manager cannot reach DockerAppData (its root
+      # list contains shared folders only), and the container user cannot write
+      # into any shared folder, so this is the only way for a normal user to
+      # obtain the password. Set SHOW_PASSWORD=off to keep it off the web.
+      - /Volume*/DockerAppData/chromiumdocker/config/info:/usr/libexec/noVNCdim/info:ro
     healthcheck:
       # noVNC/websockify answers on 6901 as soon as the desktop is up
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6901/ || exit 1"]

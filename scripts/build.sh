@@ -210,10 +210,20 @@ if len(ports) == 1:
     chk(8000 <= host <= 19999, f"host port {host} outside the TOS-recommended 8000-19999 range")
     chk(cont == 6901, f"container port should be 6901 (noVNC), got {cont}")
 # no literal secrets anywhere in the compose
-for pat, msg in ((r"PASSWORD:\s*\S", "compose must not contain a literal password"),
-                 (r"VNC_PW:\s*\S", "compose must not contain a literal VNC password")):
+# SHOW_PASSWORD / FONTS are boolean feature switches, not credentials
+for pat, msg in ((r"(?<!SHOW_)PASSWORD:\s*\S", "compose must not contain a literal password"),
+                 (r"VNC_PW:\s*\S", "compose must not contain a literal VNC password"),
+                 (r"(?i)(SECRET|TOKEN|API_KEY):\s*\S", "compose must not contain a literal secret")):
     chk(re.search(pat, comp_nc) is None, msg)
 chk("http://127.0.0.1:6901/" in comp_nc, "healthcheck must probe the noVNC port")
+chk("config/info:/usr/libexec/noVNCdim/info:ro" in comp_nc,
+    "the info page must be exposed read-only at /usr/libexec/noVNCdim/info")
+chk("SHOW_PASSWORD" in comp_nc, "compose must keep the SHOW_PASSWORD switch")
+chk("info/index.html" in comp_nc, "the entrypoint must generate the info page")
+# never expose the whole home directory through the noVNC web root
+chk("config:/usr/libexec/noVNCdim" not in comp_nc,
+    "must not mount the whole app data directory into the web root")
+
 # every '$' in a compose file is subject to ${VAR} interpolation: an unescaped
 # ${HOME} is replaced by the *host's* home and undefined variables expand to an
 # empty string (this exact trap shipped in 13-1). Only '$$' is safe.
