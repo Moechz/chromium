@@ -196,14 +196,19 @@ chk(comp_nc.count("restart: unless-stopped") == services, "every service must us
 chk(comp_nc.count("healthcheck:") == services, "every service must define a healthcheck")
 chk(len(re.findall(r"^\s+TZ:\s*\S", comp_nc, re.M)) == services, "every service must set TZ explicitly")
 chk(re.search(r"user:\s*[\"']?(0|root)", comp_nc) is None, "containers must not run as root")
-# ★ 门禁（2026-10-14 修正）：**禁止**在 compose 里写 `/Volume*`（平台不展开通配符，
-    #   会创建字面量 /Volume* 目录且不会 chown → 容器写不进去、数据静默丢失）；
-    #   挂载源必须是绝对路径 /Volume1/DockerAppData/<appid>/...
-    chk("/Volume*" not in comp_nc, "compose 不得包含 /Volume*（平台不展开通配符；请写绝对 /Volume1/DockerAppData/<appid>/...）")
-    for _m in re.findall(r"^\s*-\s*([^:\s]+):", comp_nc, re.M):
-        if _m.startswith("/"):
-            chk(_m.startswith(f"/Volume1/DockerAppData/{appid}/") or _m.startswith("/etc/localtime") or _m.startswith("/usr/libexec"),
-                f"挂载源必须为绝对 /Volume1/DockerAppData/{appid}/...（或明确的只读系统路径），实际: {_m}")
+# ★ 门禁（2026-10-14 修正，真机实证）：**禁止**在 compose 里写 `/Volume*`。
+#   平台不展开通配符：会创建字面量 /Volume* 目录（落在系统盘），且**不会被 chown**
+#   → 容器（user 1000:1000）写不进去、持久化静默失效（chromiumdocker v13-7 实际故障）。
+#   挂载源必须是绝对路径 /Volume1/DockerAppData/<appid>/...
+chk("/Volume*" not in comp_nc,
+    "compose must never contain /Volume* (the platform does not expand it; "
+    "write the absolute /Volume1/DockerAppData/<appid>/... instead)")
+for _m in re.findall(r"^\s*-\s*([^:\s]+):", comp_nc, re.M):
+    if _m.startswith("/"):
+        chk(_m.startswith(f"/Volume1/DockerAppData/{appid}/")
+            or _m.startswith(("/etc/localtime", "/usr/libexec")),
+            f"mount source must be an absolute /Volume1/DockerAppData/{appid}/... path "
+            f"(or an explicit read-only system path), got: {_m}")
 chk(comp_nc.rstrip().endswith("protocol: http"), "x-app-meta must be the last block")
 chk("x-app-meta:" in comp_nc and f'port: {cfg_port}' in comp_nc,
     "x-app-meta web.port must match config.ini path port")

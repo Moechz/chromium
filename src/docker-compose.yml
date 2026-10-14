@@ -26,7 +26,9 @@
 #   * container_name == application id, restart: unless-stopped
 #   * non-root user via the user field, no privileged mode, no host network
 #   * all persistent data under ABSOLUTE /Volume1/DockerAppData/<appid>/
-#     ★ 绝不写 /Volume*（平台不展开通配符：会创建字面量 /Volume* 目录，且不会被 chown → 容器写不进去）
+#     ★ Never use the wildcard volume form: the platform does not expand it,
+#     the literal directory is created on the system disk and is never chowned,
+#     so the container (uid 1000) cannot write into it.
 #   * explicit TZ, healthcheck on the only service
 #   * no hardcoded credentials: the VNC password is generated on first start
 #   * x-app-meta is the last block of this file

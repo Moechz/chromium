@@ -26,16 +26,16 @@ Bookmarks, history, extensions, saved logins and downloads are stored on the NAS
   this takes **9 seconds** and afterwards every script renders. It never blocks or breaks
   the app: it is skipped once provisioned, can be disabled with `FONTS=off`, retries on
   the next start if it fails, and you can instead copy your own `.ttf/.otf/.ttc` files
-  into `/Volume*/DockerAppData/chromiumdocker/config/.local/share/fonts`.
+  into `/Volume1/DockerAppData/chromiumdocker/config/.local/share/fonts`.
 - **Non-root by design.** The upstream image runs as an unprivileged user
   (uid 1000/1001) and serves its web client over **plain HTTP** — exactly what the
   TOS Docker model (`http://${ip}:<port>`) needs. Every service pins `user: "1000:1000"`.
 - **No hardcoded credentials.** The VNC access password is generated from
   `/dev/urandom` on first start and written to
-  `/Volume*/DockerAppData/chromiumdocker/config/.vnc_password`.
+  `/Volume1/DockerAppData/chromiumdocker/config/.vnc_password`.
 - **No privileged mode, no host networking, no Docker socket, no `cap_add`.**
 - **Data persistence** for the whole browser profile under
-  `/Volume*/DockerAppData/chromiumdocker/` (backup/migrate/reset friendly).
+  `/Volume1/DockerAppData/chromiumdocker/` (backup/migrate/reset friendly).
 - **Healthcheck on the service** (`wget` against the noVNC port), explicit `TZ`,
   `restart: unless-stopped`, `x-app-meta` at the end of the compose file.
 - **Docker Hub image only with a fixed tag** (never `:latest`).
