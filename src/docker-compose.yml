@@ -25,7 +25,8 @@
 #   * Docker Hub image only, fixed tag (never :latest)
 #   * container_name == application id, restart: unless-stopped
 #   * non-root user via the user field, no privileged mode, no host network
-#   * all persistent data under /Volume*/DockerAppData/<appid>/
+#   * all persistent data under ABSOLUTE /Volume1/DockerAppData/<appid>/
+#     ★ 绝不写 /Volume*（平台不展开通配符：会创建字面量 /Volume* 目录，且不会被 chown → 容器写不进去）
 #   * explicit TZ, healthcheck on the only service
 #   * no hardcoded credentials: the VNC password is generated on first start
 #   * x-app-meta is the last block of this file
@@ -185,7 +186,7 @@ services:
       # whole home directory: Chromium profile, bookmarks, downloads, noVNC/VNC
       # config, the generated VNC password and the provisioned fonts all live
       # here and survive updates
-      - /Volume*/DockerAppData/chromiumdocker/config:/home/headless
+      - /Volume1/DockerAppData/chromiumdocker/config:/home/headless
       # Only the small `info` sub-directory is exposed, never the whole home:
       # this makes the VNC password reachable at
       #   http://<NAS-IP>:8901/info/
@@ -193,7 +194,7 @@ services:
       # list contains shared folders only), and the container user cannot write
       # into any shared folder, so this is the only way for a normal user to
       # obtain the password. Set SHOW_PASSWORD=off to keep it off the web.
-      - /Volume*/DockerAppData/chromiumdocker/config/info:/usr/libexec/noVNCdim/info:ro
+      - /Volume1/DockerAppData/chromiumdocker/config/info:/usr/libexec/noVNCdim/info:ro
     healthcheck:
       # noVNC/websockify answers on 6901 as soon as the desktop is up
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6901/ || exit 1"]

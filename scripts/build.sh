@@ -196,7 +196,14 @@ chk(comp_nc.count("restart: unless-stopped") == services, "every service must us
 chk(comp_nc.count("healthcheck:") == services, "every service must define a healthcheck")
 chk(len(re.findall(r"^\s+TZ:\s*\S", comp_nc, re.M)) == services, "every service must set TZ explicitly")
 chk(re.search(r"user:\s*[\"']?(0|root)", comp_nc) is None, "containers must not run as root")
-chk(f"/Volume*/DockerAppData/{appid}/" in comp_nc, f"volumes must live under /Volume*/DockerAppData/{appid}/")
+# ★ 门禁（2026-10-14 修正）：**禁止**在 compose 里写 `/Volume*`（平台不展开通配符，
+    #   会创建字面量 /Volume* 目录且不会 chown → 容器写不进去、数据静默丢失）；
+    #   挂载源必须是绝对路径 /Volume1/DockerAppData/<appid>/...
+    chk("/Volume*" not in comp_nc, "compose 不得包含 /Volume*（平台不展开通配符；请写绝对 /Volume1/DockerAppData/<appid>/...）")
+    for _m in re.findall(r"^\s*-\s*([^:\s]+):", comp_nc, re.M):
+        if _m.startswith("/"):
+            chk(_m.startswith(f"/Volume1/DockerAppData/{appid}/") or _m.startswith("/etc/localtime") or _m.startswith("/usr/libexec"),
+                f"挂载源必须为绝对 /Volume1/DockerAppData/{appid}/...（或明确的只读系统路径），实际: {_m}")
 chk(comp_nc.rstrip().endswith("protocol: http"), "x-app-meta must be the last block")
 chk("x-app-meta:" in comp_nc and f'port: {cfg_port}' in comp_nc,
     "x-app-meta web.port must match config.ini path port")
